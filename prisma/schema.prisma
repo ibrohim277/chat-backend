@@ -1,0 +1,224 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ============================================
+// ENUMS
+// ============================================
+
+enum UserStatus {
+  ONLINE
+  OFFLINE
+  AWAY
+  DO_NOT_DISTURB
+}
+
+enum RoomType {
+  PRIVATE
+  GROUP
+  CHANNEL
+}
+
+enum MessageType {
+  TEXT
+  IMAGE
+  FILE
+  AUDIO
+  VIDEO
+  SYSTEM
+}
+
+enum MemberRole {
+  OWNER
+  ADMIN
+  MEMBER
+}
+
+// ============================================
+// USER
+// ============================================
+
+model User {
+  id          String     @id @default(uuid())
+  username    String     @unique
+  email       String     @unique
+  password    String
+  displayName String?    @map("display_name")
+  avatarUrl   String?    @map("avatar_url")
+  bio         String?
+  status      UserStatus @default(OFFLINE)
+  lastSeenAt  DateTime?  @map("last_seen_at")
+  isVerified  Boolean    @default(false) @map("is_verified")
+  createdAt   DateTime   @default(now()) @map("created_at")
+  updatedAt   DateTime   @updatedAt @map("updated_at")
+
+  createdRooms  Room[]            @relation("RoomCreator")
+  roomMembers   RoomMember[]
+  sentMessages  Message[]         @relation("MessageSender")
+  reactions     MessageReaction[]
+  connections   UserConnection[]
+  refreshTokens RefreshToken[]
+
+  @@map("users")
+}
+
+// ============================================
+// ROOM
+// ============================================
+
+model Room {
+  id          String   @id @default(uuid())
+  name        String?
+  description String?
+  avatarUrl   String?  @map("avatar_url")
+  type        RoomType @default(PRIVATE)
+  isArchived  Boolean  @default(false) @map("is_archived")
+  createdById String   @map("created_by_id")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  createdBy User         @relation("RoomCreator", fields: [createdById], references: [id])
+  members   RoomMember[]
+  messages  Message[]
+
+  @@map("rooms")
+}
+
+// ============================================
+// ROOM MEMBER
+// ============================================
+
+model RoomMember {
+  roomId     String     @map("room_id")
+  userId     String     @map("user_id")
+  role       MemberRole @default(MEMBER)
+  lastReadAt DateTime?  @map("last_read_at")
+  isMuted    Boolean    @default(false) @map("is_muted")
+  joinedAt   DateTime   @default(now()) @map("joined_at")
+
+  room Room @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([roomId, userId])
+  @@map("room_members")
+}
+
+// ============================================
+// MESSAGE
+// ============================================
+
+model Message {
+  id        String      @id @default(uuid())
+  roomId    String      @map("room_id")
+  senderId  String      @map("sender_id")
+  replyToId String?     @map("reply_to_id")
+  content   String?
+  type      MessageType @default(TEXT)
+  isEdited  Boolean     @default(false) @map("is_edited")
+  isDeleted Boolean     @default(false) @map("is_deleted")
+  editedAt  DateTime?   @map("edited_at")
+  createdAt DateTime    @default(now()) @map("created_at")
+
+  room        Room              @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  sender      User              @relation("MessageSender", fields: [senderId], references: [id])
+  replyTo     Message?          @relation("MessageReplies", fields: [replyToId], references: [id])
+  replies     Message[]         @relation("MessageReplies")
+  reactions   MessageReaction[]
+  attachments Attachment[]
+  readBy      MessageRead[]
+
+  @@index([roomId, createdAt(sort: Desc)])
+  @@index([senderId])
+  @@map("messages")
+}
+
+// ============================================
+// MESSAGE READ
+// ============================================
+
+model MessageRead {
+  messageId String   @map("message_id")
+  userId    String   @map("user_id")
+  readAt    DateTime @default(now()) @map("read_at")
+
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@id([messageId, userId])
+  @@map("message_reads")
+}
+
+// ============================================
+// MESSAGE REACTION
+// ============================================
+
+model MessageReaction {
+  messageId String   @map("message_id")
+  userId    String   @map("user_id")
+  emoji     String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([messageId, userId, emoji])
+  @@map("message_reactions")
+}
+
+// ============================================
+// ATTACHMENT
+// ============================================
+
+model Attachment {
+  id           String   @id @default(uuid())
+  messageId    String   @map("message_id")
+  fileUrl      String   @map("file_url")
+  fileName     String   @map("file_name")
+  fileType     String   @map("file_type")
+  fileSize     Int      @map("file_size")
+  thumbnailUrl String?  @map("thumbnail_url")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@map("attachments")
+}
+
+// ============================================
+// USER CONNECTION
+// ============================================
+
+model UserConnection {
+  id          String   @id @default(uuid())
+  userId      String   @map("user_id")
+  socketId    String   @unique @map("socket_id")
+  device      String?
+  ipAddress   String?  @map("ip_address")
+  connectedAt DateTime @default(now()) @map("connected_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("user_connections")
+}
+
+// ============================================
+// REFRESH TOKEN
+// ============================================
+
+model RefreshToken {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  token     String   @unique
+  expiresAt DateTime @map("expires_at")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("refresh_tokens")
+}
